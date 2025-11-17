@@ -1,0 +1,88 @@
+# ==============================================================================
+# STAGE 1: Find pdtm latest version and download the binary
+# ==============================================================================
+FROM alpine:latest AS pdtm-downloader
+
+# Add required packages
+RUN apk add --no-cache wget unzip curl jq
+
+# (Ex: linux/amd64, linux/arm64)
+ARG TARGETPLATFORM
+
+# --- Find latest version and download it ---
+RUN set -e; \
+    # 1. Extract the latest tag
+    echo "Finding the latest pdtm version from GitHub API..."; \
+    LATEST_TAG=$(curl -s "https://api.github.com/repos/projectdiscovery/pdtm/releases/latest" | jq -r .tag_name); \
+    # Remove v to contruct the download link.
+    PDTM_VERSION=$(echo $LATEST_TAG | sed 's/v//'); \
+    echo "Latest version found: ${LATEST_TAG}"; \
+    \
+    # 2. construct the arch.
+    case "${TARGETPLATFORM}" in \
+        "linux/amd64") ARCH="amd64" ;; \
+        "linux/arm64") ARCH="arm64" ;; \
+        *) echo "Unsupported platform for pdtm: ${TARGETPLATFORM}" && exit 1 ;; \
+    esac; \
+    \
+    # 3. Download the zip file
+    echo "Downloading pdtm v${PDTM_VERSION} for ${ARCH}..."; \
+    wget -q "https://github.com/projectdiscovery/pdtm/releases/download/${LATEST_TAG}/pdtm_${PDTM_VERSION}_linux_${ARCH}.zip"; \
+    \
+    # 4. extract the file
+    unzip "pdtm_${PDTM_VERSION}_linux_${ARCH}.zip"; \
+    chmod +x pdtm
+
+# ==============================================================================
+# STAGE 2: Build massdns
+# ==============================================================================
+FROM alpine:latest AS massdns-builder
+
+RUN apk --no-cache --virtual .build-deps add git build-base \
+    && git clone --depth=1 https://github.com/blechschmidt/massdns.git \
+    && cd massdns && make && make install \
+    && apk del .build-deps 
+
+# ==============================================================================
+# STAGE 3: Final n8n Runtime Image
+# Add sudo permission to node user
+# ==============================================================================
+FROM docker.n8n.io/n8nio/n8n:latest
+
+ARG USER_NAME=node
+ARG USER_HOME=/home/${USER_NAME}
+ARG PDTM_TOOLS_DIR=${USER_HOME}/.pdtm/go/bin
+
+# Switch to root
+USER root
+
+# Install sudo package
+RUN apk add --no-cache sudo \
+    # required for naabu
+    libpcap-dev \
+    nmap \
+    go
+
+# Add user to sudo group and give sudo group passwordless permission
+RUN addgroup sudo && \
+    adduser ${USER_NAME} sudo && \
+    echo "%sudo ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+## Deploy pdtm
+# Create pdtm directory
+RUN mkdir -p ${PDTM_TOOLS_DIR}
+# Add pdtm directory to path
+ENV PATH=${PDTM_TOOLS_DIR}:$PATH
+COPY --from=pdtm-downloader /pdtm ${PDTM_TOOLS_DIR}/pdtm
+# Own pdtm directory
+RUN chown -R ${USER_NAME}:${USER_NAME} ${USER_HOME}/.pdtm
+
+## Deploy massdns
+COPY --from=massdns-builder /usr/local/bin/massdns /usr/local/bin/massdns
+
+# Switch back to non-root user
+USER ${USER_NAME}
+
+# Check update pdtm and install all the tools
+RUN pdtm -up
+RUN pdtm -install-all

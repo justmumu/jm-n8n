@@ -1,0 +1,45 @@
+version: "3.8"
+
+name: "n8n-worker"
+
+volumes:
+  n8n_storage:
+
+services:
+  n8n-worker:
+    image: docker.n8n.io/n8nio/n8n
+    restart: always
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=${POSTGRES_HOST}
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_NON_ROOT_PASSWORD}
+      - DB_POSTGRESDB_POOL_SIZE=5
+      - EXECUTIONS_MODE=queue
+      - OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=true
+      - QUEUE_BULL_REDIS_HOST=${REDIS_HOST}
+      - QUEUE_HEALTH_CHECK_ACTIVE=true
+      - QUEUE_BULL_REDIS_PASSWORD=${REDIS_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_METRICS=${N8N_METRICS}
+      - N8N_METRICS_INCLUDE_QUEUE_METRICS=${N8N_METRICS_INCLUDE_QUEUE_METRICS}
+      - N8N_PROXY_HOPS=${N8N_PROXY_HOPS}
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - N8N_EMAIL_MODE=${N8N_EMAIL_MODE}
+      - N8N_SMTP_HOST=${N8N_SMTP_HOST}
+      - N8N_SMTP_PORT=${N8N_SMTP_PORT}
+      - N8N_SMTP_USER=${N8N_SMTP_USER}
+      - N8N_SMTP_PASS=${N8N_SMTP_PASS}
+      - N8N_SMTP_SENDER=${N8N_SMTP_SENDER}
+      - N8N_SMTP_SSL=${N8N_SMTP_SSL}
+      - N8N_SMTP_STARTTLS=${N8N_SMTP_STARTTLS}
+    command: worker --concurrency=10
+    ports:
+      - 127.0.0.1:5678:5678
+    volumes:
+      - n8n_storage:/home/node/.n8n
