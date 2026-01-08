@@ -6,11 +6,18 @@ ARG N8N_VERSION=latest
 FROM alpine:3.23 AS builder
 
 # Install dependencies
-RUN apk add --no-cache --update go postgresql-client
+RUN apk add --no-cache --update go postgresql-client libpcap-dev git make gcc musl-dev nmap
 
 # Set Go environment
 ENV GOPATH=/root/go
 ENV PATH="${GOPATH}/bin:${PATH}"
+
+# Build and install massdns (required for shuffledns)
+RUN git clone https://github.com/blechschmidt/massdns.git /tmp/massdns && \
+    cd /tmp/massdns && \
+    make && \
+    cp bin/massdns /usr/local/bin/ && \
+    rm -rf /tmp/massdns
 
 # Install pdtm
 RUN go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
@@ -25,11 +32,14 @@ FROM n8nio/n8n:${N8N_VERSION}
 
 USER root
 
-# Copy postgresql-client binaries from builder
-COPY --from=builder /usr/bin/psql /usr/bin/psql
-COPY --from=builder /usr/bin/pg_dump /usr/bin/pg_dump
-COPY --from=builder /usr/bin/pg_restore /usr/bin/pg_restore
-COPY --from=builder /usr/bin/pg_isready /usr/bin/pg_isready
+# Copy postgresql binaries (actual binaries, not symlinks)
+COPY --from=builder /usr/libexec/postgresql /usr/libexec/postgresql
+
+# Create symlinks for postgresql commands
+RUN ln -s /usr/libexec/postgresql/psql /usr/bin/psql && \
+    ln -s /usr/libexec/postgresql/pg_dump /usr/bin/pg_dump && \
+    ln -s /usr/libexec/postgresql/pg_restore /usr/bin/pg_restore && \
+    ln -s /usr/libexec/postgresql/pg_isready /usr/bin/pg_isready
 
 # Copy required libraries for postgresql-client
 COPY --from=builder /usr/lib/libpq.so* /usr/lib/
@@ -40,6 +50,13 @@ COPY --from=builder /usr/lib/libsasl2.so* /usr/lib/
 # Copy pdtm and all tools from builder default path
 COPY --from=builder /root/.pdtm/go/bin /home/node/.pdtm
 RUN chown -R node:node /home/node/.pdtm
+
+# Copy massdns binary (required for shuffledns)
+COPY --from=builder /usr/local/bin/massdns /usr/local/bin/massdns
+
+# Copy nmap
+COPY --from=builder /usr/bin/nmap /usr/bin/nmap
+COPY --from=builder /usr/share/nmap /usr/share/nmap
 
 USER node
 
@@ -58,7 +75,8 @@ RUN echo "=== Verifying PostgreSQL client ===" && \
     echo "=== Tool versions ===" && \
     nuclei --version && \
     httpx --version && \
-    naabu --version && \
     subfinder --version && \
+    massdns --help | head -1 && \
+    nmap --version | head -1 && \
     echo "" && \
     echo "=== All verifications passed! ==="
