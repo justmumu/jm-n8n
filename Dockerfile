@@ -1,31 +1,46 @@
 ARG N8N_VERSION=latest
 
-FROM n8nio/n8n:${N8N_VERSION}
+# ============================================
+# Stage 1: Builder - Install tools in Alpine
+# ============================================
+FROM alpine:3.23 AS builder
 
-USER root
+# Install Go and build dependencies
+RUN apk add --no-cache --update go curl
 
-# Install dependencies
-RUN apk add --no-cache --update postgresql-client go
-
-# Set Go environment for build
+# Set Go environment
 ENV GOPATH=/root/go
 ENV PATH="${GOPATH}/bin:${PATH}"
 
 # Install pdtm
 RUN go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
 
-# Create pdtm directory for node user and copy pdtm binary
-RUN mkdir -p /home/node/.pdtm && \
-    cp /root/go/bin/pdtm /home/node/.pdtm/ && \
-    chown -R node:node /home/node/.pdtm
+# Create tools directory and install all ProjectDiscovery tools
+RUN mkdir -p /tools && \
+    /root/go/bin/pdtm -install-all -bp /tools
 
-# Clean up Go (no longer needed)
-RUN apk del go && rm -rf /root/go /root/.cache
+# ============================================
+# Stage 2: Final - Copy to n8n image
+# ============================================
+FROM n8nio/n8n:${N8N_VERSION}
+
+USER root
+
+# Install postgresql-client from Alpine repos (need to add apk first)
+COPY --from=alpine:3.23 /sbin/apk /sbin/apk
+COPY --from=alpine:3.23 /etc/apk /etc/apk
+COPY --from=alpine:3.23 /lib/apk /lib/apk
+COPY --from=alpine:3.23 /usr/share/apk /usr/share/apk
+COPY --from=alpine:3.23 /var/cache/apk /var/cache/apk
+
+RUN apk add --no-cache postgresql-client && \
+    rm -rf /sbin/apk /etc/apk /lib/apk /usr/share/apk /var/cache/apk
+
+# Copy pdtm and all tools from builder
+COPY --from=builder /tools /home/node/.pdtm
+RUN chown -R node:node /home/node/.pdtm
 
 USER node
 
 # Set PATH for node user
 ENV PATH="/home/node/.pdtm:${PATH}"
-
-# Install all ProjectDiscovery tools as node user
-RUN /home/node/.pdtm/pdtm -install-all -bp /home/node/.pdtm
