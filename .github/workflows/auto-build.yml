@@ -22,11 +22,16 @@ jobs:
       - name: Get latest n8n version
         id: n8n_version
         run: |
+          # Get the digest of the 'latest' tag
+          LATEST_DIGEST=$(curl -s "https://hub.docker.com/v2/repositories/n8nio/n8n/tags/latest" | jq -r '.images[0].digest')
+          echo "Latest tag digest: $LATEST_DIGEST"
+          
+          # Find the version tag with the same digest
           VERSION=$(curl -s "https://hub.docker.com/v2/repositories/n8nio/n8n/tags?page_size=100" \
-            | jq -r '.results[].name' \
+            | jq -r --arg digest "$LATEST_DIGEST" \
+            '.results[] | select(.images[0].digest == $digest) | .name' \
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sort -V \
-            | tail -1)
+            | head -1)
           echo "Detected latest n8n version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
