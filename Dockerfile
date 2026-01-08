@@ -62,6 +62,11 @@ COPY --from=builder /usr/local/bin/massdns /usr/local/bin/massdns
 COPY --from=builder /usr/bin/nmap /usr/bin/nmap
 COPY --from=builder /usr/share/nmap /usr/share/nmap
 
+# Copy required libraries for nmap
+COPY --from=builder /usr/lib/libpcap.so* /usr/lib/
+COPY --from=builder /usr/lib/libssh2.so* /usr/lib/
+COPY --from=builder /usr/lib/liblua-5.4.so* /usr/lib/
+
 USER node
 
 # Set PATH for node user
