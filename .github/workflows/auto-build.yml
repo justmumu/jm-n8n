@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.n8n_version.outputs.version }}
+      alpine_version: ${{ steps.alpine_version.outputs.version }}
       should_build: ${{ steps.check_image.outputs.should_build }}
     
     steps:
@@ -28,6 +29,13 @@ jobs:
             | tail -1)
           echo "Detected latest n8n version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get Alpine version from n8n image
+        id: alpine_version
+        run: |
+          ALPINE_VER=$(docker run --rm --entrypoint sh n8nio/n8n:${{ steps.n8n_version.outputs.version }} -c "cat /etc/alpine-release | cut -d. -f1,2")
+          echo "Detected Alpine version: $ALPINE_VER"
+          echo "version=$ALPINE_VER" >> $GITHUB_OUTPUT
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -95,6 +103,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-${{ steps.platform.outputs.suffix }}
           build-args: |
             N8N_VERSION=${{ needs.check-version.outputs.version }}
+            ALPINE_VERSION=${{ needs.check-version.outputs.alpine_version }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ steps.platform.outputs.suffix }}
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ steps.platform.outputs.suffix }},mode=max
 

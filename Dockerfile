@@ -1,12 +1,13 @@
 ARG N8N_VERSION=latest
+ARG ALPINE_VERSION=3.23
 
 # ============================================
-# Stage 1: Builder - Install tools in Alpine
+# Stage 1: Builder - Compile Go tools
 # ============================================
-FROM alpine:3.23 AS builder
+FROM alpine:${ALPINE_VERSION} AS builder
 
-# Install dependencies
-RUN apk add --no-cache --update go postgresql-client libpcap-dev git make gcc musl-dev nmap
+# Install build dependencies
+RUN apk add --no-cache go libpcap-dev git make gcc musl-dev
 
 # Set Go environment
 ENV GOPATH=/root/go
@@ -26,62 +27,26 @@ RUN go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
 RUN /root/go/bin/pdtm -install-all
 
 # ============================================
-# Stage 2: Final - Copy to n8n image
+# Stage 2: Final - n8n with tools
 # ============================================
 FROM n8nio/n8n:${N8N_VERSION}
 
 USER root
 
-# Copy postgresql binaries (actual binaries, not symlinks)
-COPY --from=builder /usr/libexec/postgresql /usr/libexec/postgresql
+# Copy apk from builder (same Alpine version = compatible)
+COPY --from=builder /sbin/apk /sbin/apk
+COPY --from=builder /usr/lib/libapk.so* /usr/lib/
 
-# Create symlinks for postgresql commands
-RUN ln -s /usr/libexec/postgresql/psql /usr/bin/psql && \
-    ln -s /usr/libexec/postgresql/pg_dump /usr/bin/pg_dump && \
-    ln -s /usr/libexec/postgresql/pg_restore /usr/bin/pg_restore && \
-    ln -s /usr/libexec/postgresql/pg_isready /usr/bin/pg_isready && \
-    ln -s /usr/libexec/postgresql/clusterdb /usr/bin/clusterdb && \
-    ln -s /usr/libexec/postgresql/createdb /usr/bin/createdb && \
-    ln -s /usr/libexec/postgresql/createuser /usr/bin/createuser && \
-    ln -s /usr/libexec/postgresql/dropdb /usr/bin/dropdb && \
-    ln -s /usr/libexec/postgresql/dropuser /usr/bin/dropuser && \
-    ln -s /usr/libexec/postgresql/pg_amcheck /usr/bin/pg_amcheck && \
-    ln -s /usr/libexec/postgresql/pg_basebackup /usr/bin/pg_basebackup && \
-    ln -s /usr/libexec/postgresql/pg_dumpall /usr/bin/pg_dumpall && \
-    ln -s /usr/libexec/postgresql/pg_receivewal /usr/bin/pg_receivewal && \
-    ln -s /usr/libexec/postgresql/pg_recvlogical /usr/bin/pg_recvlogical && \
-    ln -s /usr/libexec/postgresql/pg_verifybackup /usr/bin/pg_verifybackup && \
-    ln -s /usr/libexec/postgresql/pgbench /usr/bin/pgbench && \
-    ln -s /usr/libexec/postgresql/reindexdb /usr/bin/reindexdb && \
-    ln -s /usr/libexec/postgresql/vacuumdb /usr/bin/vacuumdb
+# Install packages with apk (no manual library copying needed!)
+RUN apk add --no-cache postgresql-client nmap && \
+    rm -f /sbin/apk /usr/lib/libapk.so*
 
-# Copy required libraries for postgresql-client
-COPY --from=builder /usr/lib/libpq.so* /usr/lib/
-COPY --from=builder /usr/lib/libldap.so* /usr/lib/
-COPY --from=builder /usr/lib/liblber.so* /usr/lib/
-COPY --from=builder /usr/lib/libsasl2.so* /usr/lib/
-COPY --from=builder /usr/lib/libreadline.so* /usr/lib/
-COPY --from=builder /usr/lib/libssl.so* /usr/lib/
-COPY --from=builder /usr/lib/libcrypto.so* /usr/lib/
-COPY --from=builder /usr/lib/libncursesw.so* /usr/lib/
-COPY --from=builder /usr/lib/liblz4.so* /usr/lib/
-COPY --from=builder /usr/lib/libzstd.so* /usr/lib/
-
-# Copy pdtm and all tools from builder default path
+# Copy pdtm and all tools from builder
 COPY --from=builder /root/.pdtm/go/bin /home/node/.pdtm
 RUN chown -R node:node /home/node/.pdtm
 
 # Copy massdns binary (required for shuffledns)
 COPY --from=builder /usr/local/bin/massdns /usr/local/bin/massdns
-
-# Copy nmap
-COPY --from=builder /usr/bin/nmap /usr/bin/nmap
-COPY --from=builder /usr/share/nmap /usr/share/nmap
-
-# Copy required libraries for nmap
-COPY --from=builder /usr/lib/libpcap.so* /usr/lib/
-COPY --from=builder /usr/lib/libssh2.so* /usr/lib/
-COPY --from=builder /usr/lib/liblua-5.4.so* /usr/lib/
 
 USER node
 
