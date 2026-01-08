@@ -134,10 +134,10 @@ RUN simplehttpserver --version
 RUN subfinder --version
 RUN tldfinder --version
 RUN tlsx --version
-RUN tunnelx --version
+RUN tunnelx --help | head -1
 RUN uncover --version
 RUN urlfinder --version
-RUN vulnx --version
+RUN vulnx version
 
 # Other tools (2)
 RUN massdns --help | head -1
