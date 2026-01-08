@@ -10,17 +10,14 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  check-and-build:
+  # Job 1: Check for new n8n version
+  check-version:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
+    outputs:
+      version: ${{ steps.n8n_version.outputs.version }}
+      should_build: ${{ steps.check_image.outputs.should_build }}
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Get the latest n8n version from Docker Hub
       - name: Get latest n8n version
         id: n8n_version
         run: |
@@ -29,10 +26,9 @@ jobs:
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
             | sort -V \
             | tail -1)
-          echo "Detected latest n8n version from Docker Hub: $VERSION"
+          echo "Detected latest n8n version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # Login to GitHub Container Registry
       - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
@@ -40,41 +36,101 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Check if this version already exists in our registry
       - name: Check if image already exists
         id: check_image
         run: |
           if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.n8n_version.outputs.version }} > /dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "should_build=false" >> $GITHUB_OUTPUT
             echo "Image already exists, skipping build."
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "should_build=true" >> $GITHUB_OUTPUT
             echo "New version detected, will build."
           fi
 
-      # Setup QEMU for multi-platform builds (ARM64 support)
-      - name: Set up QEMU
-        if: steps.check_image.outputs.exists == 'false'
-        uses: docker/setup-qemu-action@v3
+  # Job 2: Build images in parallel (matrix strategy with native runners)
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      # Setup Docker Buildx for advanced build features
       - name: Set up Docker Buildx
-        if: steps.check_image.outputs.exists == 'false'
         uses: docker/setup-buildx-action@v3
 
-      # Build and push the multi-platform image
-      - name: Build and push Docker image
-        if: steps.check_image.outputs.exists == 'false'
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract platform suffix
+        id: platform
+        run: |
+          PLATFORM="${{ matrix.platform }}"
+          SUFFIX="${PLATFORM#linux/}"
+          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
+
+      - name: Build and push platform image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           provenance: false
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.n8n_version.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-${{ steps.platform.outputs.suffix }}
           build-args: |
-            N8N_VERSION=${{ steps.n8n_version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            N8N_VERSION=${{ needs.check-version.outputs.version }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ steps.platform.outputs.suffix }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-${{ steps.platform.outputs.suffix }},mode=max
+
+  # Job 3: Create multi-platform manifest
+  create-manifest:
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest for version tag
+        run: |
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}
+
+      - name: Create and push manifest for latest tag
+        run: |
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Cleanup platform-specific tags (optional)
+        continue-on-error: true
+        run: |
+          echo "Platform-specific images kept for cache purposes"
+          echo "  - ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-amd64"
+          echo "  - ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-arm64"
