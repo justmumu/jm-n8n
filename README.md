@@ -1,10 +1,12 @@
 # jm-n8n
 
-Custom n8n Docker image with `postgresql-client` included. Automatically built and published to GHCR when new n8n versions are released.
+Custom n8n Docker image with security and database tools. Automatically built and published to GHCR when new n8n versions are released.
 
 ## Features
 
-- `postgresql-client` pre-installed for database operations within workflows
+- **PostgreSQL client** (18 tools): psql, pg_dump, pg_restore, etc.
+- **ProjectDiscovery tools** (25 tools): nuclei, httpx, subfinder, katana, dnsx, etc.
+- **Network tools**: nmap, massdns
 - Multi-platform support (linux/amd64, linux/arm64)
 - Queue mode ready with Redis support
 - Auto-updated daily via GitHub Actions
@@ -29,7 +31,7 @@ docker compose -f docker-compose-n8n-worker.yml up -d
 ## Project Structure
 
 ```
-├── Dockerfile                          # Custom n8n image (adds postgresql-client)
+├── Dockerfile                          # Custom n8n image with tools
 ├── .github/workflows/auto-build.yml    # Daily auto-build workflow
 └── n8n-hosting/postgresql-redis-n8n/
     ├── docker-compose-n8n-main.yml     # Main instance (PostgreSQL + Redis + n8n)
