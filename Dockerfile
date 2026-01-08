@@ -66,17 +66,18 @@ ENV PATH="/home/node/.pdtm:${PATH}"
 # ============================================
 # Verify installations
 # ============================================
-RUN echo "=== Verifying PostgreSQL client ===" && \
-    psql --version && \
-    echo "" && \
-    echo "=== Verifying pdtm tools ===" && \
-    ls -la /home/node/.pdtm/ && \
-    echo "" && \
-    echo "=== Tool versions ===" && \
-    nuclei --version && \
-    httpx --version && \
-    subfinder --version && \
-    massdns --help | head -1 && \
-    nmap --version | head -1 && \
-    echo "" && \
-    echo "=== All verifications passed! ==="
+RUN echo "=== Verifying PostgreSQL client ===" && psql --version
+
+RUN echo "=== Verifying pdtm tools ===" && ls -la /home/node/.pdtm/
+
+RUN echo "=== nuclei ===" && nuclei --version
+
+RUN echo "=== httpx ===" && httpx --version
+
+RUN echo "=== subfinder ===" && subfinder --version
+
+RUN echo "=== massdns ===" && massdns --help | head -1
+
+RUN echo "=== nmap ===" && nmap --version | head -1
+
+RUN echo "=== All verifications passed! ==="
