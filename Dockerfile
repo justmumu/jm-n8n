@@ -5,8 +5,8 @@ ARG N8N_VERSION=latest
 # ============================================
 FROM alpine:3.23 AS builder
 
-# Install Go and build dependencies
-RUN apk add --no-cache --update go curl
+# Install dependencies
+RUN apk add --no-cache --update go postgresql-client
 
 # Set Go environment
 ENV GOPATH=/root/go
@@ -26,15 +26,17 @@ FROM n8nio/n8n:${N8N_VERSION}
 
 USER root
 
-# Install postgresql-client from Alpine repos (need to add apk first)
-COPY --from=alpine:3.23 /sbin/apk /sbin/apk
-COPY --from=alpine:3.23 /etc/apk /etc/apk
-COPY --from=alpine:3.23 /lib/apk /lib/apk
-COPY --from=alpine:3.23 /usr/share/apk /usr/share/apk
-COPY --from=alpine:3.23 /var/cache/apk /var/cache/apk
+# Copy postgresql-client binaries from builder
+COPY --from=builder /usr/bin/psql /usr/bin/psql
+COPY --from=builder /usr/bin/pg_dump /usr/bin/pg_dump
+COPY --from=builder /usr/bin/pg_restore /usr/bin/pg_restore
+COPY --from=builder /usr/bin/pg_isready /usr/bin/pg_isready
 
-RUN apk add --no-cache postgresql-client && \
-    rm -rf /sbin/apk /etc/apk /lib/apk /usr/share/apk /var/cache/apk
+# Copy required libraries for postgresql-client
+COPY --from=builder /usr/lib/libpq.so* /usr/lib/
+COPY --from=builder /usr/lib/libldap.so* /usr/lib/
+COPY --from=builder /usr/lib/liblber.so* /usr/lib/
+COPY --from=builder /usr/lib/libsasl2.so* /usr/lib/
 
 # Copy pdtm and all tools from builder
 COPY --from=builder /tools /home/node/.pdtm
