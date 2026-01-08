@@ -46,6 +46,10 @@ COPY --from=builder /usr/lib/libpq.so* /usr/lib/
 COPY --from=builder /usr/lib/libldap.so* /usr/lib/
 COPY --from=builder /usr/lib/liblber.so* /usr/lib/
 COPY --from=builder /usr/lib/libsasl2.so* /usr/lib/
+COPY --from=builder /usr/lib/libreadline.so* /usr/lib/
+COPY --from=builder /usr/lib/libssl.so* /usr/lib/
+COPY --from=builder /usr/lib/libcrypto.so* /usr/lib/
+COPY --from=builder /usr/lib/libncursesw.so* /usr/lib/
 
 # Copy pdtm and all tools from builder default path
 COPY --from=builder /root/.pdtm/go/bin /home/node/.pdtm
