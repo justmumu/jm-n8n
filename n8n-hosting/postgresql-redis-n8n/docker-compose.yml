@@ -1,0 +1,188 @@
+# Unified Docker Compose for n8n
+# Usage:
+#   Main server:   COMPOSE_PROFILES=main docker compose up -d
+#   Worker server: COMPOSE_PROFILES=worker docker compose up -d
+
+volumes:
+  db_storage:
+  n8n_storage:
+  redis_storage:
+
+# Shared environment variables
+x-n8n-env: &n8n-env
+  # n8n postgres configuration
+  DB_TYPE: postgresdb
+  DB_POSTGRESDB_HOST: ${POSTGRES_HOST:-postgres}
+  DB_POSTGRESDB_PORT: ${POSTGRES_PORT:-5432}
+  DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+  DB_POSTGRESDB_USER: ${POSTGRES_NON_ROOT_USER}
+  DB_POSTGRESDB_PASSWORD: ${POSTGRES_NON_ROOT_PASSWORD}
+  DB_POSTGRESDB_POOL_SIZE: ${POSTGRES_POOL_SIZE:-5}
+  # n8n redis configuration
+  QUEUE_BULL_REDIS_HOST: ${REDIS_HOST:-redis}
+  QUEUE_BULL_REDIS_PASSWORD: ${REDIS_PASSWORD}
+  # n8n smtp configuration
+  N8N_EMAIL_MODE: ${N8N_EMAIL_MODE}
+  N8N_SMTP_HOST: ${N8N_SMTP_HOST}
+  N8N_SMTP_PORT: ${N8N_SMTP_PORT}
+  N8N_SMTP_USER: ${N8N_SMTP_USER}
+  N8N_SMTP_PASS: ${N8N_SMTP_PASS}
+  N8N_SMTP_SENDER: ${N8N_SMTP_SENDER}
+  N8N_SMTP_SSL: ${N8N_SMTP_SSL}
+  N8N_SMTP_STARTTLS: ${N8N_SMTP_STARTTLS}
+  # n8n metrics configuration
+  N8N_METRICS: ${N8N_METRICS}
+  N8N_METRICS_INCLUDE_QUEUE_METRICS: ${N8N_METRICS_INCLUDE_QUEUE_METRICS}
+  # n8n secret configuration
+  N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+  N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET}
+  # n8n reverse proxy configuration
+  N8N_PROXY_HOPS: ${N8N_PROXY_HOPS}
+  # n8n timezone configuration
+  GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+  # n8n node function allow builtin configuration
+  NODE_FUNCTION_ALLOW_BUILTIN: ${NODE_FUNCTION_ALLOW_BUILTIN}
+  # n8n static settings configuration
+  EXECUTIONS_MODE: queue
+  OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS: "true"
+  QUEUE_HEALTH_CHECK_ACTIVE: "true"
+  N8N_DIAGNOSTICS_ENABLED: "false"
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+  N8N_RUNNERS_ENABLED: "true"
+  
+  
+
+services:
+  # ============================================
+  # MAIN PROFILE: postgres + redis + n8n
+  # ============================================
+  postgres:
+    profiles: ["main"]
+    image: postgres:17
+    restart: always
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=100"
+      - "-c"
+      - "shared_buffers=4GB"
+      - "-c"
+      - "effective_cache_size=8GB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c" 
+      - "wal_buffers=64MB"
+      - "-c" 
+      - "default_statistics_target=100"
+      - "-c" 
+      - "random_page_cost=4.0"
+      - "-c" 
+      - "effective_io_concurrency=2"
+      - "-c"
+      - "work_mem=32MB"
+      - "-c" 
+      - "huge_pages=off"
+      - "-c" 
+      - "max_worker_processes=4"
+      - "-c" 
+      - "max_parallel_workers_per_gather=1"
+      - "-c" 
+      - "max_parallel_workers=2"
+      - "-c" 
+      - "max_parallel_maintenance_workers=1"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_NON_ROOT_USER: ${POSTGRES_NON_ROOT_USER}
+      POSTGRES_NON_ROOT_PASSWORD: ${POSTGRES_NON_ROOT_PASSWORD}
+    ports:
+      - 5432:5432
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+      - ./init-data.sh:/docker-entrypoint-initdb.d/init-data.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    profiles: ["main"]
+    image: redis:8-alpine
+    restart: always
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    ports:
+      - 6379:6379
+    volumes:
+      - redis_storage:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  n8n:
+    profiles: ["main"]
+    image: ghcr.io/justmumu/jm-n8n:latest
+    restart: always
+    environment:
+      <<: *n8n-env
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      NODE_OPTIONS: "--max-old-space-size=6144"
+    ports:
+      - 127.0.0.1:5678:5678
+    volumes:
+      - n8n_storage:/home/node/.n8n
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ============================================
+  # WORKER PROFILE: n8n-worker only
+  # ============================================
+  n8n-worker:
+    profiles: ["worker"]
+    image: ghcr.io/justmumu/jm-n8n:latest
+    restart: always
+    command: worker --concurrency=10
+    environment:
+      <<: *n8n-env
+      NODE_OPTIONS: "--max-old-space-size=4096"
+    volumes:
+      - n8n_storage:/home/node/.n8n
+
+  # ============================================
+  # BACKUP PROFILE: Database + storage backup
+  # ============================================
+  # Usage: docker compose --profile backup run --rm backup
+  backup:
+    profiles: ["backup"]
+    build: ./backup
+    volumes:
+      - n8n_storage:/data/n8n:ro
+      - ${GDRIVE_SERVICE_ACCOUNT_PATH:-./backup/service-account.json}:/config/service-account.json:ro
+    environment:
+      # PostgreSQL configuration
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_NON_ROOT_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_NON_ROOT_PASSWORD}
+      # Backup notification service configuration
+      BACKUP_SVC_NOTIFICATION_URL: ${BACKUP_SVC_NOTIFICATION_URL:-}
+      BACKUP_SVC_API_HEADER: ${BACKUP_SVC_API_HEADER:-}
+      BACKUP_SVC_API_KEY: ${BACKUP_SVC_API_KEY:-}
+      # Gdrive configuration
+      RCLONE_CONFIG_GDRIVE_TEAM_DRIVE: ${GDRIVE_TEAM_DRIVE_ID:-}
+      RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: ${GDRIVE_ROOT_FOLDER_ID:-}
+      RETENTION_DAYS: ${GDRIVE_RETENTION_DAYS:-30}      
+      # backup service static configuration
+      RCLONE_CONFIG_GDRIVE_TYPE: drive
+      RCLONE_CONFIG_GDRIVE_SCOPE: drive
+      RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_FILE: /config/service-account.json
+      

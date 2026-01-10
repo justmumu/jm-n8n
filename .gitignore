@@ -3,6 +3,16 @@
 
 ### dotenv ###
 .env
+*.env
+!*.env.example
+
+### Google Cloud ###
+service-account.json
+!service-account.json.example
+
+### Backup files ###
+*.dump
+*.tar.gz
 
 ### Git ###
 # Created by git for backups. To disable backups in Git:
