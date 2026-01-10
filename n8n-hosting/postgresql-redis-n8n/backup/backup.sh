@@ -181,4 +181,4 @@ SUMMARY="• *File:* ${FINAL_FILENAME}<br>• *Size:* ${FINAL_SIZE}<br>• *Dura
 send_notification \
     "✅ Backup Successful ✅" \
     "We have successfully backed up the n8n instance with file ${FINAL_FILENAME}" \
-    "**Backup Summary:**<br><br>${SUMMARY}<br><br>**Log Output:**<br><br>\`\`\`<br>${LOG_OUTPUT}\`\`\`"
+    "**Backup Summary:**<br><br>${SUMMARY}<br><br>**Log Output:**<br><br>${LOG_OUTPUT}"
