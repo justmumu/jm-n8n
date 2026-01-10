@@ -49,8 +49,6 @@ x-n8n-env: &n8n-env
   N8N_DIAGNOSTICS_ENABLED: "false"
   N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
   N8N_RUNNERS_ENABLED: "true"
-  
-  
 
 services:
   # ============================================
