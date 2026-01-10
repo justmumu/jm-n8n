@@ -123,10 +123,10 @@ fi
 # [2/5] n8n Storage Backup (excluding large/unnecessary files)
 # ==========================================
 log "[2/5] 📂 Archiving n8n storage..."
-tar -czf "${TEMP_DIR}/n8n_files.tar.gz" \
-    -C /data/n8n . \
-    --exclude='./binaryData' \
-    --exclude='*.log'
+tar --exclude='./binaryData' \
+    --exclude='*.log' \
+    -czf "${TEMP_DIR}/n8n_files.tar.gz" \
+    -C /data/n8n .
 
 FILES_SIZE=$(du -h "${TEMP_DIR}/n8n_files.tar.gz" | cut -f1)
 log "      ✅ n8n files archived (${FILES_SIZE})"
