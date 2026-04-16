@@ -148,3 +148,23 @@ jobs:
           echo "Platform-specific images kept for cache purposes"
           echo "  - ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-amd64"
           echo "  - ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.check-version.outputs.version }}-arm64"
+
+  # Job 4: Cleanup old GHCR versions (keep last 15)
+  cleanup-old-versions:
+    needs: [check-version, create-manifest]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete old GHCR versions (DRY RUN)
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          package: ${{ github.event.repository.name }}
+          owner: ${{ github.repository_owner }}
+          keep-n-tagged: 15
+          exclude-tags: latest,cache-amd64,cache-arm64
+          delete-untagged: true
+          delete-partial-images: true
+          dry-run: true
