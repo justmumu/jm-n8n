@@ -67,6 +67,12 @@ Automated backup to Google Team Drive with 30-day retention.
         └── service-account.json.example
 ```
 
+## Auto-Build & GHCR Retention
+
+Daily workflow (`.github/workflows/auto-build.yml`) detects new n8n releases and pushes multi-arch images (`linux/amd64`, `linux/arm64`) to GHCR.
+
+Retention policy keeps only the last **15 semver tags**. `latest` and cache tags (`cache-amd64`, `cache-arm64`) are never deleted. Orphan/partial manifest children are pruned automatically. Cleanup runs after `create-manifest` (or standalone on no-build days as a safety net).
+
 ## Environment Variables
 
 Create a `.env` file:
