@@ -154,11 +154,12 @@ jobs:
     needs: [check-version, create-manifest]
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       packages: write
     steps:
       - name: Delete old GHCR versions (DRY RUN)
-        uses: dataaxiom/ghcr-cleanup-action@v1
+        uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 # v1.0.16
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           package: ${{ github.event.repository.name }}
