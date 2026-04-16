@@ -158,7 +158,7 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Delete old GHCR versions (DRY RUN)
+      - name: Delete old GHCR versions
         uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 # v1.0.16
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -168,4 +168,3 @@ jobs:
           exclude-tags: latest,cache-amd64,cache-arm64
           delete-untagged: true
           delete-partial-images: true
-          dry-run: true
