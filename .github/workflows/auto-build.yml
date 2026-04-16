@@ -152,7 +152,7 @@ jobs:
   # Job 4: Cleanup old GHCR versions (keep last 15)
   cleanup-old-versions:
     needs: [check-version, create-manifest]
-    if: needs.check-version.outputs.should_build == 'true'
+    if: always() && (needs.create-manifest.result == 'success' || needs.create-manifest.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
