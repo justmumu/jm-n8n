@@ -197,29 +197,53 @@ jobs:
           EXC_JSON=$(printf '%s\n' "${EXC[@]}" | jq -R . | jq -s .)
 
           jq --argjson excl "$EXC_JSON" --argjson keepN "$KEEP_N" '
+            def base_of(tags):
+              tags
+              | map(capture("^(?<b>\\d+\\.\\d+\\.\\d+)(-amd64|-arm64)?$")? | .b)
+              | unique
+              | .[0] // "unknown";
             map(. + {tags: (.metadata.container.tags // [])})
             | (map(select(.tags | length == 0))) as $untagged
             | (map(select(.tags | length > 0))) as $tagged
             | ($tagged | map(select([.tags[] | IN($excl[])] | any))) as $protected
             | ($tagged | map(select([.tags[] | IN($excl[])] | any | not))
-                | sort_by(.updated_at) | reverse) as $cands
-            | ($cands[:$keepN]) as $kept
-            | ($cands[$keepN:]) as $del_t
+                | map(. + {base: base_of(.tags)})) as $rest
+            | ($rest | group_by(.base)
+                | map({
+                    base: .[0].base,
+                    latest: (map(.updated_at) | max),
+                    members: .
+                  })
+                | sort_by(.latest) | reverse) as $groups
+            | ($groups[:$keepN]) as $kept_groups
+            | ($groups[$keepN:]) as $del_groups
+            | ($kept_groups | map(.members[])) as $kept
+            | ($del_groups | map(.members[])) as $del_t
             | {
                 protected_count: ($protected | length),
-                kept_count: ($kept | length),
-                del_tagged: ($del_t | map({id, tags, updated_at})),
-                del_untagged: ($untagged | map({id, updated_at}))
+                kept_release_count: ($kept_groups | length),
+                kept_manifest_count: ($kept | length),
+                del_release_count: ($del_groups | length),
+                del_tagged: ($del_t | map({id, tags, updated_at, base})),
+                del_untagged: ($untagged | map({id, updated_at})),
+                kept_releases: ($kept_groups | map(.base)),
+                del_releases: ($del_groups | map(.base))
               }
           ' versions.json > plan.json
 
           echo "Plan summary:"
-          jq '{protected: .protected_count, kept: .kept_count,
-               del_tagged: (.del_tagged|length),
+          jq '{protected_manifests: .protected_count,
+               kept_releases: .kept_release_count,
+               kept_manifests: .kept_manifest_count,
+               del_releases: .del_release_count,
+               del_manifests: (.del_tagged|length),
                del_untagged: (.del_untagged|length)}' plan.json
 
+          echo "Kept releases: $(jq -r '.kept_releases | join(", ")' plan.json)"
+          echo "Deleting releases: $(jq -r '.del_releases | join(", ")' plan.json)"
+
           echo "Tagged to delete:"
-          jq -r '.del_tagged[] | "  id=\(.id) updated=\(.updated_at) tags=\(.tags|join(","))"' plan.json
+          jq -r '.del_tagged[] | "  id=\(.id) base=\(.base) updated=\(.updated_at) tags=\(.tags|join(","))"' plan.json
           echo "Untagged to delete:"
           jq -r '.del_untagged[] | "  id=\(.id) updated=\(.updated_at)"' plan.json
 
