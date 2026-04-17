@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '0 3 * * *' # Runs daily at 03:00 UTC
   workflow_dispatch: # Manual trigger
+    inputs:
+      dry_run:
+        description: "Cleanup dry-run (log only, no delete)"
+        type: boolean
+        default: true
+      skip_build:
+        description: "Skip build/manifest, run cleanup only"
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -43,7 +52,7 @@ jobs:
           echo "version=$ALPINE_VER" >> $GITHUB_OUTPUT
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -52,7 +61,10 @@ jobs:
       - name: Check if image already exists
         id: check_image
         run: |
-          if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.n8n_version.outputs.version }} > /dev/null 2>&1; then
+          if [ "${{ inputs.skip_build }}" = "true" ]; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "skip_build requested, forcing should_build=false"
+          elif docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.n8n_version.outputs.version }} > /dev/null 2>&1; then
             echo "should_build=false" >> $GITHUB_OUTPUT
             echo "Image already exists, skipping build."
           else
@@ -84,7 +96,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -122,7 +134,7 @@ jobs:
     
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -157,14 +169,77 @@ jobs:
     timeout-minutes: 10
     permissions:
       packages: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      PKG: ${{ github.event.repository.name }}
+      KEEP_N: "15"
+      EXCLUDE_TAGS: "latest,cache-amd64,cache-arm64"
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
     steps:
       - name: Delete old GHCR versions
-        uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 # v1.0.16
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          package: ${{ github.event.repository.name }}
-          owner: ${{ github.repository_owner }}
-          keep-n-tagged: 15
-          exclude-tags: latest,cache-amd64,cache-arm64
-          delete-untagged: true
-          delete-partial-images: true
+        run: |
+          set -euo pipefail
+
+          OWNER_TYPE=$(gh api "/users/$OWNER" --jq '.type' | tr '[:upper:]' '[:lower:]')
+          if [ "$OWNER_TYPE" = "organization" ]; then
+            BASE="/orgs/$OWNER/packages/container/$PKG/versions"
+          else
+            BASE="/users/$OWNER/packages/container/$PKG/versions"
+          fi
+          echo "Endpoint: $BASE"
+          echo "DRY_RUN=$DRY_RUN"
+
+          gh api --paginate "$BASE" --jq '.[]' | jq -s . > versions.json
+          echo "Total versions: $(jq length versions.json)"
+
+          IFS=',' read -ra EXC <<< "$EXCLUDE_TAGS"
+          EXC_JSON=$(printf '%s\n' "${EXC[@]}" | jq -R . | jq -s .)
+
+          jq --argjson excl "$EXC_JSON" --argjson keepN "$KEEP_N" '
+            map(. + {tags: (.metadata.container.tags // [])})
+            | (map(select(.tags | length == 0))) as $untagged
+            | (map(select(.tags | length > 0))) as $tagged
+            | ($tagged | map(select([.tags[] | IN($excl[])] | any))) as $protected
+            | ($tagged | map(select([.tags[] | IN($excl[])] | any | not))
+                | sort_by(.updated_at) | reverse) as $cands
+            | ($cands[:$keepN]) as $kept
+            | ($cands[$keepN:]) as $del_t
+            | {
+                protected_count: ($protected | length),
+                kept_count: ($kept | length),
+                del_tagged: ($del_t | map({id, tags, updated_at})),
+                del_untagged: ($untagged | map({id, updated_at}))
+              }
+          ' versions.json > plan.json
+
+          echo "Plan summary:"
+          jq '{protected: .protected_count, kept: .kept_count,
+               del_tagged: (.del_tagged|length),
+               del_untagged: (.del_untagged|length)}' plan.json
+
+          echo "Tagged to delete:"
+          jq -r '.del_tagged[] | "  id=\(.id) updated=\(.updated_at) tags=\(.tags|join(","))"' plan.json
+          echo "Untagged to delete:"
+          jq -r '.del_untagged[] | "  id=\(.id) updated=\(.updated_at)"' plan.json
+
+          delete_or_log() {
+            local id="$1" label="$2"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "  [dry-run] would DELETE $label id=$id"
+            else
+              if gh api -X DELETE "$BASE/$id"; then
+                echo "  deleted $label id=$id"
+              else
+                echo "  failed $label id=$id"
+              fi
+            fi
+          }
+
+          jq -r '.del_tagged[] | "\(.id) \(.tags|join(","))"' plan.json \
+            | while read -r id tags; do delete_or_log "$id" "tagged[$tags]"; done
+
+          jq -r '.del_untagged[].id' plan.json \
+            | while read -r id; do delete_or_log "$id" "untagged"; done
+
+          echo "Cleanup done."
