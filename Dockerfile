@@ -1,13 +1,13 @@
 ARG N8N_VERSION=latest
-ARG ALPINE_VERSION=3.23
+ARG ALPINE_VERSION=3.22
 
 # ============================================
 # Stage 1: Builder - Compile Go tools
 # ============================================
-FROM alpine:${ALPINE_VERSION} AS builder
+FROM golang:1.25-alpine${ALPINE_VERSION} AS builder
 
-# Install build dependencies
-RUN apk add --no-cache go libpcap-dev git make gcc musl-dev
+# Install build dependencies (go zaten var)
+RUN apk add --no-cache libpcap-dev git make gcc musl-dev
 
 # Set Go environment
 ENV GOPATH=/root/go
