@@ -49,6 +49,10 @@ jobs:
         run: |
           ALPINE_VER=$(docker run --rm --entrypoint sh n8nio/n8n:${{ steps.n8n_version.outputs.version }} -c "grep VERSION_ID /etc/os-release | cut -d= -f2")
           echo "Detected Alpine version: $ALPINE_VER"
+          # golang alpine images are tagged major.minor only (e.g. golang:1.25-alpine3.22),
+          # not patch. Truncate 3.22.4 -> 3.22 so the builder FROM resolves.
+          ALPINE_VER=$(echo "$ALPINE_VER" | cut -d. -f1,2)
+          echo "Builder Alpine version: $ALPINE_VER"
           echo "version=$ALPINE_VER" >> $GITHUB_OUTPUT
 
       - name: Log in to Container Registry
